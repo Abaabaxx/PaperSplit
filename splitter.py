@@ -103,9 +103,9 @@ def write_sections(sections: list, parent_dir: Path):
         section_dir = parent_dir / prefixed
         section_dir.mkdir(parents=True, exist_ok=True)
 
-        md_path = section_dir / f"{prefixed}.md"
-        content = f"# {section.title}\n\n{section.intro}\n" if section.intro else f"# {section.title}\n"
-        md_path.write_text(content, encoding="utf-8")
+        if section.intro:
+            md_path = section_dir / f"{prefixed}.md"
+            md_path.write_text(f"# {section.title}\n\n{section.intro}\n", encoding="utf-8")
 
         if section.children:
             write_sections(section.children, section_dir)
