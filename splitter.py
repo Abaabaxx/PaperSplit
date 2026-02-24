@@ -142,15 +142,22 @@ def write_sections(sections: list, parent_dir: Path, top_level: bool = False):
             conclusion_idx = idx
 
 
-def split(arxiv_id: str, data_dir: str = "./data") -> Path:
-    """主入口：读 full_paper.md → 解析 → 拆分写入 sections/"""
+def split(arxiv_id: str, data_dir: str = "./data", output_dir: str = "./output") -> Path:
+    """主入口：读 full_paper.md → 解析 → 拆分写入 output/{arxiv_id}/sections/"""
     paper_dir = Path(data_dir) / arxiv_id
     md_path = paper_dir / "full_paper.md"
 
     if not md_path.exists():
         raise FileNotFoundError(f"未找到 {md_path}，请先运行 converter.py")
 
-    sections_dir = paper_dir / "sections"
+    # 创建输出目录结构
+    out_paper_dir = Path(output_dir) / arxiv_id
+    out_paper_dir.mkdir(parents=True, exist_ok=True)
+
+    # figures 文件夹（暂时为空）
+    (out_paper_dir / "figures").mkdir(exist_ok=True)
+
+    sections_dir = out_paper_dir / "sections"
     if sections_dir.exists():
         shutil.rmtree(sections_dir)
     sections_dir.mkdir()
