@@ -94,15 +94,16 @@ def parse_sections(md_text: str) -> list:
 
 def write_sections(sections: list, parent_dir: Path):
     """递归将 Section 树写入文件夹结构。"""
-    for section in sections:
+    for idx, section in enumerate(sections):
         slug = slugify(section.title)
         if not slug:
             slug = "section"
 
-        section_dir = parent_dir / slug
+        prefixed = f"{idx}_{slug}"
+        section_dir = parent_dir / prefixed
         section_dir.mkdir(parents=True, exist_ok=True)
 
-        md_path = section_dir / f"{slug}.md"
+        md_path = section_dir / f"{prefixed}.md"
         content = f"# {section.title}\n\n{section.intro}\n" if section.intro else f"# {section.title}\n"
         md_path.write_text(content, encoding="utf-8")
 
