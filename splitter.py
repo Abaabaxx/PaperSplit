@@ -10,6 +10,53 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+def extract_paper_title(paper_dir: Path) -> str:
+    """从主 tex 文件中提取 \\title{} 内容，清理 LaTeX 命令后返回纯文本。"""
+    # 找主 tex 文件
+    main_tex = None
+    for tex_file in paper_dir.rglob("*.tex"):
+        try:
+            content = tex_file.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if re.search(r"\\documentclass", content):
+            main_tex = content
+            break
+
+    if main_tex is None:
+        return None
+
+    # 提取 \title{...}，用括号计数处理嵌套花括号
+    m = re.search(r"\\title\{", main_tex)
+    if not m:
+        return None
+
+    start = m.end()
+    depth, i = 1, start
+    while i < len(main_tex) and depth > 0:
+        if main_tex[i] == "{":
+            depth += 1
+        elif main_tex[i] == "}":
+            depth -= 1
+        i += 1
+    raw = main_tex[start: i - 1]
+
+    # 清理 LaTeX：去掉 $...$ 包裹（保留内容），去掉 \cmd{...}（保留内容），去掉 \! \\ 等
+    title = raw
+    title = re.sub(r"\$([^$]*)\$", lambda m: m.group(1), title)   # $...$ → 内容
+    # 循环剥离 \cmd{...} 直到稳定（处理嵌套）
+    cmd_pattern = re.compile(r"\\(?:boldsymbol|mathit|textsc|textbf|emph)\{([^}]*)\}")
+    for _ in range(5):
+        new = cmd_pattern.sub(r"\1", title)
+        if new == title:
+            break
+        title = new
+    title = re.sub(r"\\[!,;:]", "", title)    # \! \, \; \: 间距命令
+    title = re.sub(r"\\\\", "", title)        # \\ 换行
+    title = re.sub(r"\s+", " ", title)        # 合并空白
+    return title.strip()
+
+
 @dataclass
 class Section:
     level: int          # 标题层级，# = 1, ## = 2, #### = 4
@@ -150,8 +197,13 @@ def split(arxiv_id: str, data_dir: str = "./data", output_dir: str = "./output")
     if not md_path.exists():
         raise FileNotFoundError(f"未找到 {md_path}，请先运行 converter.py")
 
+    # 提取论文标题作为文件夹名，失败则退回 arxiv_id
+    title = extract_paper_title(paper_dir)
+    folder_name = title if title else arxiv_id
+    print(f"[标题] {folder_name}")
+
     # 创建输出目录结构
-    out_paper_dir = Path(output_dir) / arxiv_id
+    out_paper_dir = Path(output_dir) / folder_name
     out_paper_dir.mkdir(parents=True, exist_ok=True)
 
     # figures 文件夹（暂时为空）
