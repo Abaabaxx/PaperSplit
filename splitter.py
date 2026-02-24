@@ -92,23 +92,54 @@ def parse_sections(md_text: str) -> list:
     return build_tree(flat, min_level=min(f[2] for f in flat))
 
 
-def write_sections(sections: list, parent_dir: Path):
-    """递归将 Section 树写入文件夹结构。"""
+CONCLUSION_KEYWORDS = {"conclusion", "conclusions", "concluding", "concluding-remarks"}
+
+
+def is_conclusion(slug: str) -> bool:
+    return any(kw in slug for kw in CONCLUSION_KEYWORDS)
+
+
+def _write_section(section, parent_dir: Path, prefixed: str):
+    """将单个 Section 写入文件夹，递归处理子节。"""
+    section_dir = parent_dir / prefixed
+    section_dir.mkdir(parents=True, exist_ok=True)
+
+    if section.intro:
+        md_path = section_dir / f"{prefixed}.md"
+        md_path.write_text(f"# {section.title}\n\n{section.intro}\n", encoding="utf-8")
+
+    if section.children:
+        write_sections(section.children, section_dir)
+
+
+def write_sections(sections: list, parent_dir: Path, top_level: bool = False):
+    """递归将 Section 树写入文件夹结构。
+    top_level=True 时，Conclusion 之后的章节放入 '其他工作/' 文件夹。
+    """
+    after_conclusion = False
+    conclusion_idx = 0
+    other_idx = 0
+    other_dir = None
+
     for idx, section in enumerate(sections):
         slug = slugify(section.title)
         if not slug:
             slug = "section"
 
-        prefixed = f"{idx}_{slug}"
-        section_dir = parent_dir / prefixed
-        section_dir.mkdir(parents=True, exist_ok=True)
+        if top_level and after_conclusion:
+            if other_dir is None:
+                other_dir = parent_dir / f"{conclusion_idx + 1}_appendix"
+                other_dir.mkdir()
+            prefixed = f"{other_idx}_{slug}"
+            _write_section(section, other_dir, prefixed)
+            other_idx += 1
+        else:
+            prefixed = f"{idx}_{slug}"
+            _write_section(section, parent_dir, prefixed)
 
-        if section.intro:
-            md_path = section_dir / f"{prefixed}.md"
-            md_path.write_text(f"# {section.title}\n\n{section.intro}\n", encoding="utf-8")
-
-        if section.children:
-            write_sections(section.children, section_dir)
+        if top_level and is_conclusion(slug):
+            after_conclusion = True
+            conclusion_idx = idx
 
 
 def split(arxiv_id: str, data_dir: str = "./data") -> Path:
@@ -130,7 +161,7 @@ def split(arxiv_id: str, data_dir: str = "./data") -> Path:
     sections = parse_sections(md_text)
     print(f"[完成] 解析出 {len(sections)} 个顶级章节")
 
-    write_sections(sections, sections_dir)
+    write_sections(sections, sections_dir, top_level=True)
 
     # 统计生成文件数
     all_files = list(sections_dir.rglob("*.md"))
