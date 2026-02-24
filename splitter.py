@@ -146,6 +146,19 @@ def is_conclusion(slug: str) -> bool:
     return any(kw in slug for kw in CONCLUSION_KEYWORDS)
 
 
+IMAGE_EXTS = {".pdf", ".png", ".jpg", ".jpeg", ".eps", ".svg", ".gif"}
+
+
+def copy_figures(paper_dir: Path, figures_dir: Path):
+    """将 paper_dir 下所有图片文件平铺复制到 figures_dir。"""
+    count = 0
+    for f in paper_dir.rglob("*"):
+        if f.is_file() and f.suffix.lower() in IMAGE_EXTS:
+            shutil.copy2(f, figures_dir / f.name)
+            count += 1
+    print(f"[图片] 复制 {count} 个文件 → {figures_dir}")
+
+
 def _write_section(section, parent_dir: Path, prefixed: str):
     """将单个 Section 写入文件夹，递归处理子节。"""
     section_dir = parent_dir / prefixed
@@ -206,8 +219,10 @@ def split(arxiv_id: str, data_dir: str = "./data", output_dir: str = "./output")
     out_paper_dir = Path(output_dir) / folder_name
     out_paper_dir.mkdir(parents=True, exist_ok=True)
 
-    # figures 文件夹（暂时为空）
-    (out_paper_dir / "figures").mkdir(exist_ok=True)
+    # 复制图片到 figures/
+    figures_dir = out_paper_dir / "figures"
+    figures_dir.mkdir(exist_ok=True)
+    copy_figures(paper_dir, figures_dir)
 
     sections_dir = out_paper_dir / "sections"
     if sections_dir.exists():
