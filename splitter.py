@@ -49,18 +49,36 @@ def extract_paper_title(paper_dir: Path) -> str:
     raw = " ".join(lines)
 
     title = raw
-    title = re.sub(r"\$([^$]*)\$", lambda m: m.group(1), title)   # $...$ → 内容
-    # 循环剥离 \cmd{...} 直到稳定（处理嵌套）
-    cmd_pattern = re.compile(r"\\(?:boldsymbol|mathit|textsc|textbf|emph)\{([^}]*)\}")
-    for _ in range(5):
-        new = cmd_pattern.sub(r"\1", title)
-        if new == title:
-            break
-        title = new
-    title = re.sub(r"\\[!,;:]", "", title)    # \! \, \; \: 间距命令
-    title = re.sub(r"\\\\", "", title)        # \\ 换行
-    title = re.sub(r"\s+", " ", title)        # 合并空白
+    title = _clean_latex_title(title)
     return title.strip()
+
+
+def _clean_latex_title(text: str) -> str:
+    """将含 LaTeX 命令的标题文本转为纯文本，循环处理直到稳定。"""
+    for _ in range(10):
+        new = _clean_latex_title_once(text)
+        if new == text:
+            break
+        text = new
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _clean_latex_title_once(text: str) -> str:
+    # \\ 换行先替换（避免干扰后续 \ 命令匹配）
+    text = re.sub(r"\\\\", " ", text)
+    # $...$ → 内容
+    text = re.sub(r"\$([^$]*)\$", lambda m: m.group(1), text)
+    # {\cmd...{args}... trailing_text} → trailing_text
+    # 匹配以 \某命令 开头的花括号组（允许命令带参数），保留尾部文本
+    text = re.sub(r"\{\\[a-zA-Z@]+(?:\{[^{}]*\})*\s*(?:\\[a-zA-Z@]+\s*)*([^{}]*)\}", r"\1", text)
+    # \cmd{...} → 内容（任意命令名）
+    text = re.sub(r"\\[a-zA-Z@]+\{([^{}]*)\}", r"\1", text)
+    # 去掉剩余的 \cmd（无参数命令和间距命令）
+    text = re.sub(r"\\[a-zA-Z@]+", "", text)
+    text = re.sub(r"\\[!,;:.]", "", text)
+    # 去掉孤立的花括号
+    text = text.replace("{", "").replace("}", "")
+    return text
 
 
 @dataclass
