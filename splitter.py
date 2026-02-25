@@ -42,6 +42,12 @@ def extract_paper_title(paper_dir: Path) -> str:
     raw = main_tex[start: i - 1]
 
     # 清理 LaTeX：去掉 $...$ 包裹（保留内容），去掉 \cmd{...}（保留内容），去掉 \! \\ 等
+    # 先去掉注释行（以 % 开头的行）和行内注释
+    lines = raw.splitlines()
+    lines = [l for l in lines if not l.lstrip().startswith("%")]
+    lines = [re.sub(r"(?<!\\)%.*", "", l) for l in lines]
+    raw = " ".join(lines)
+
     title = raw
     title = re.sub(r"\$([^$]*)\$", lambda m: m.group(1), title)   # $...$ → 内容
     # 循环剥离 \cmd{...} 直到稳定（处理嵌套）

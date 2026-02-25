@@ -22,7 +22,7 @@ def find_main_tex(paper_dir: Path) -> Path:
     raise FileNotFoundError(f"在 {paper_dir} 中未找到含 \\documentclass 的 tex 文件")
 
 
-def merge_tex(tex_path: Path, _visited: set = None) -> str:
+def merge_tex(tex_path: Path, _visited: set = None, _root_dir: Path = None) -> str:
     """递归内联 \\input{} / \\include{}，返回合并后的 tex 字符串。"""
     if _visited is None:
         _visited = set()
@@ -32,6 +32,9 @@ def merge_tex(tex_path: Path, _visited: set = None) -> str:
         return ""  # 防止循环引用
     _visited.add(tex_path)
 
+    if _root_dir is None:
+        _root_dir = tex_path.parent
+
     try:
         content = tex_path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
@@ -40,16 +43,16 @@ def merge_tex(tex_path: Path, _visited: set = None) -> str:
     base_dir = tex_path.parent
 
     def replace_input(match):
-        cmd = match.group(1)   # input 或 include
         arg = match.group(2).strip()
 
-        # 补全 .tex 扩展名
-        candidate = base_dir / arg
-        if not candidate.suffix:
-            candidate = candidate.with_suffix(".tex")
+        # 优先从当前文件所在目录查找，其次从根目录查找
+        for search_dir in [base_dir, _root_dir]:
+            candidate = search_dir / arg
+            if not candidate.suffix:
+                candidate = candidate.with_suffix(".tex")
+            if candidate.exists():
+                return merge_tex(candidate, _visited, _root_dir)
 
-        if candidate.exists():
-            return merge_tex(candidate, _visited)
         # 找不到文件时保留原命令
         return match.group(0)
 
@@ -59,7 +62,7 @@ def merge_tex(tex_path: Path, _visited: set = None) -> str:
 
 
 def preprocess_tex(tex: str) -> str:
-    """预处理 tex 字符串，将 pandoc 会丢弃的环境转为标准 section。"""
+    """预处理 tex 字符串，清理 pandoc 无法处理的结构。"""
     # \begin{abstract}...\end{abstract} → \section*{Abstract}
     tex = re.sub(
         r"\\begin\{abstract\}(.*?)\\end\{abstract\}",
@@ -67,15 +70,123 @@ def preprocess_tex(tex: str) -> str:
         tex,
         flags=re.DOTALL,
     )
+    # lstlisting / minted → verbatim（pandoc 能正确识别 verbatim 为逐字内容）
+    for env in ("lstlisting", "minted", "Verbatim"):
+        tex = re.sub(
+            rf"\\begin\{{{env}\}}(?:\[.*?\])?(.*?)\\end\{{{env}\}}",
+            r"\\begin{verbatim}\1\\end{verbatim}",
+            tex,
+            flags=re.DOTALL,
+        )
+    # 完整删除 figure / figure* 环境（内含图片路径，对文字阅读无用）
+    for env in ("figure\\*", "figure"):
+        tex = re.sub(
+            rf"\\begin\{{{env}\}}.*?\\end\{{{env}\}}",
+            "",
+            tex,
+            flags=re.DOTALL,
+        )
+    # 删除 table / table* 包装标签，保留内部 tabular 和 caption 内容
+    for env in ("table\\*", "table"):
+        tex = re.sub(rf"\\begin\{{{env}\}}(?:\[.*?\])?", "", tex)
+        tex = re.sub(rf"\\end\{{{env}\}}", "", tex)
+    # 修复剩余不匹配的环境标签
+    tex = _fix_unmatched_envs(tex)
     return tex
+
+
+def _fix_unmatched_envs(tex: str) -> str:
+    """移除无匹配对的 \\end{x}，避免 pandoc 解析错误。"""
+    lines = tex.splitlines(keepends=True)
+    result = []
+    stack = []
+
+    begin_pat = re.compile(r"\\begin\{([^}]+)\}")
+    end_pat = re.compile(r"\\end\{([^}]+)\}")
+
+    for line in lines:
+        if line.lstrip().startswith("%"):
+            result.append(line)
+            continue
+
+        pct = line.find("%")
+        code = line[:pct] if pct >= 0 else line
+
+        begins = list(begin_pat.finditer(code))
+        ends = list(end_pat.finditer(code))
+
+        if not begins and not ends:
+            result.append(line)
+            continue
+
+        events = [(m.start(), "begin", m.group(1)) for m in begins] + \
+                 [(m.start(), "end",   m.group(1)) for m in ends]
+        events.sort()
+
+        drop_positions = set()
+
+        for _pos, kind, env in events:
+            if kind == "begin":
+                stack.append(env)
+            else:
+                if stack and stack[-1] == env:
+                    stack.pop()
+                else:
+                    drop_positions.add(_pos)
+
+        if not drop_positions:
+            result.append(line)
+            continue
+
+        new_line = line
+        offset = 0
+        for m in sorted(end_pat.finditer(code), key=lambda x: x.start()):
+            if m.start() in drop_positions:
+                s, e = m.start() + offset, m.end() + offset
+                new_line = new_line[:s] + new_line[e:]
+                offset -= (m.end() - m.start())
+        result.append(new_line)
+
+    return "".join(result)
+
+
+def _count_brace_depth(text: str) -> int:
+    """计算文本中未闭合的 '{' 数量（忽略注释行和行内注释）。"""
+    depth = 0
+    for line in text.splitlines():
+        if line.lstrip().startswith("%"):
+            continue
+        pct = line.find("%")
+        code = line[:pct] if pct >= 0 else line
+        depth += code.count("{") - code.count("}")
+    return depth
+
+
+def _extract_body(tex: str) -> str:
+    """提取 \\begin{document} 与 \\end{document} 之间的正文，
+    并用最简 preamble 重新包装，规避原始 preamble 中的语法错误。"""
+    m = re.search(r"\\begin\{document\}(.*?)\\end\{document\}", tex, re.DOTALL)
+    if not m:
+        return tex
+
+    body = m.group(1)
+
+    # 若 body 存在未闭合的 '{'，在末尾补上对应数量的 '}'
+    depth = _count_brace_depth(body)
+    if depth > 0:
+        body = body.rstrip("\n") + "\n" + "}" * depth + "\n"
+
+    minimal_preamble = "\\documentclass{article}\n"
+    return minimal_preamble + "\\begin{document}\n" + body + "\n\\end{document}\n"
 
 
 def tex_to_markdown(merged_tex: str, output_path: Path) -> Path:
     """调用 pandoc 将 tex 字符串转为 Markdown，保存到 output_path。"""
     merged_tex = preprocess_tex(merged_tex)
+    merged_tex = _extract_body(merged_tex)
     cmd = [
         "pandoc",
-        "-f", "latex",
+        "-f", "latex+raw_tex",
         "-t", "markdown",
         "--wrap=none",
     ]
