@@ -162,19 +162,20 @@ def _count_brace_depth(text: str) -> int:
     return depth
 
 
-def _extract_body(tex: str) -> str:
+def _extract_body(tex: str, pad_braces: bool = False) -> str:
     """提取 \\begin{document} 与 \\end{document} 之间的正文，
-    并用最简 preamble 重新包装，规避原始 preamble 中的语法错误。"""
+    并用最简 preamble 重新包装，规避原始 preamble 中的语法错误。
+    pad_braces=True 时才在末尾补齐未闭合的 '}'（用于 pandoc 报错后的回退）。"""
     m = re.search(r"\\begin\{document\}(.*?)\\end\{document\}", tex, re.DOTALL)
     if not m:
         return tex
 
     body = m.group(1)
 
-    # 若 body 存在未闭合的 '{'，在末尾补上对应数量的 '}'
-    depth = _count_brace_depth(body)
-    if depth > 0:
-        body = body.rstrip("\n") + "\n" + "}" * depth + "\n"
+    if pad_braces:
+        depth = _count_brace_depth(body)
+        if depth > 0:
+            body = body.rstrip("\n") + "\n" + "}" * depth + "\n"
 
     minimal_preamble = "\\documentclass{article}\n"
     return minimal_preamble + "\\begin{document}\n" + body + "\n\\end{document}\n"
@@ -183,7 +184,6 @@ def _extract_body(tex: str) -> str:
 def tex_to_markdown(merged_tex: str, output_path: Path) -> Path:
     """调用 pandoc 将 tex 字符串转为 Markdown，保存到 output_path。"""
     merged_tex = preprocess_tex(merged_tex)
-    merged_tex = _extract_body(merged_tex)
     cmd = [
         "pandoc",
         "-f", "latex+raw_tex",
@@ -191,16 +191,22 @@ def tex_to_markdown(merged_tex: str, output_path: Path) -> Path:
         "--wrap=none",
     ]
 
-    result = subprocess.run(
-        cmd,
-        input=merged_tex,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
+    # 先不补 brace 直接尝试；若 pandoc 因未闭合 '{' 报错再补齐后重试
+    for pad in (False, True):
+        tex = _extract_body(merged_tex, pad_braces=pad)
+        result = subprocess.run(
+            cmd,
+            input=tex,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        if result.returncode == 0:
+            break
+        last_error = result.stderr
 
     if result.returncode != 0:
-        raise RuntimeError(f"pandoc 转换失败：{result.stderr}")
+        raise RuntimeError(f"pandoc 转换失败：{last_error}")
 
     output_path.write_text(result.stdout, encoding="utf-8")
     return output_path
