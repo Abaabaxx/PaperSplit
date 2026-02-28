@@ -90,6 +90,9 @@ def preprocess_tex(tex: str) -> str:
     for env in ("table\\*", "table"):
         tex = re.sub(rf"\\begin\{{{env}\}}(?:\[.*?\])?", "", tex)
         tex = re.sub(rf"\\end\{{{env}\}}", "", tex)
+    # \global\long\def / \long\def → \def（pandoc 不认识 \long 修饰符）
+    tex = re.sub(r"\\global\\long\\def\b", r"\\def", tex)
+    tex = re.sub(r"\\long\\def\b", r"\\def", tex)
     # 修复剩余不匹配的环境标签
     tex = _fix_unmatched_envs(tex)
     return tex

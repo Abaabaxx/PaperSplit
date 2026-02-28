@@ -9,12 +9,9 @@ import sys
 import tarfile
 from pathlib import Path
 
-import requests
+import subprocess
 
 ARXIV_SRC_URL = "https://arxiv.org/src/{arxiv_id}"
-HEADERS = {
-    "User-Agent": "paper_split/0.1 (https://github.com/placeholder; mailto:placeholder@example.com)"
-}
 
 
 def download_arxiv_source(arxiv_id: str, data_dir: str = "./data") -> Path:
@@ -25,21 +22,32 @@ def download_arxiv_source(arxiv_id: str, data_dir: str = "./data") -> Path:
     url = ARXIV_SRC_URL.format(arxiv_id=arxiv_id)
     print(f"[下载] {url}")
 
-    resp = requests.get(url, headers=HEADERS, stream=True, timeout=60)
-    if resp.status_code != 200:
-        raise RuntimeError(f"下载失败，HTTP {resp.status_code}: {url}")
+    # 用 curl 下载，避免系统 Python LibreSSL 的 TLS 兼容性问题
+    # -L 跟重定向，-s 静默，-D - 输出响应头到 stdout，-o 保存 body
+    tmp_path = dest_dir / f"{arxiv_id}.tmp"
+    header_output = subprocess.run(
+        ["curl", "-L", "-s", "--max-time", "120",
+         "-D", "-",  # 响应头输出到 stdout
+         "-o", str(tmp_path),
+         "-A", "paper_split/0.1",
+         url],
+        capture_output=True, text=True
+    )
+    if header_output.returncode != 0:
+        raise RuntimeError(f"下载失败: {header_output.stderr}")
+    if not tmp_path.exists() or tmp_path.stat().st_size == 0:
+        raise RuntimeError(f"下载结果为空: {url}")
 
-    # 根据 Content-Type 决定扩展名
-    content_type = resp.headers.get("Content-Type", "")
-    if "tar" in content_type:
-        ext = ".tar.gz"
-    else:
-        ext = ".gz"
+    # 从响应头判断 Content-Type
+    content_type = ""
+    for line in header_output.stdout.splitlines():
+        if line.lower().startswith("content-type:"):
+            content_type = line.split(":", 1)[1].strip()
+            break
 
+    ext = ".tar.gz" if "tar" in content_type else ".gz"
     archive_path = dest_dir / f"{arxiv_id}{ext}"
-    with open(archive_path, "wb") as f:
-        for chunk in resp.iter_content(chunk_size=8192):
-            f.write(chunk)
+    tmp_path.rename(archive_path)
 
     print(f"[完成] 已保存到 {archive_path}（{archive_path.stat().st_size / 1024:.1f} KB）")
     return archive_path
