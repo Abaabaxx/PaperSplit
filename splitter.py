@@ -9,19 +9,16 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from converter import find_main_tex
+
 
 def extract_paper_title(paper_dir: Path) -> str:
     """从主 tex 文件中提取 \\title{} 内容，清理 LaTeX 命令后返回纯文本。"""
-    # 找主 tex 文件
-    main_tex = None
-    for tex_file in paper_dir.rglob("*.tex"):
-        try:
-            content = tex_file.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            continue
-        if re.search(r"\\documentclass", content):
-            main_tex = content
-            break
+    try:
+        main_tex_path = find_main_tex(paper_dir)
+        main_tex = main_tex_path.read_text(encoding="utf-8", errors="ignore")
+    except (FileNotFoundError, OSError):
+        return None
 
     if main_tex is None:
         return None

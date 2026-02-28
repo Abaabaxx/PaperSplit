@@ -10,16 +10,49 @@ from pathlib import Path
 
 
 def find_main_tex(paper_dir: Path) -> Path:
-    """找到含 \\documentclass 的主 tex 文件。"""
+    """找到含 \\documentclass 的主 tex 文件。
+    优先级：main.tex > 其他常用名 > 字符数最多的文件（正文内容最多）。
+    排除明显的模板/样式文件（名称含 template/sample/example/rebuttal）。
+    """
+    PREFERRED = ["main.tex", "paper.tex", "article.tex", "manuscript.tex"]
+    EXCLUDE_KEYWORDS = ["template", "sample", "example", "rebuttal"]
+
     tex_files = list(paper_dir.rglob("*.tex"))
+
+    candidates = []
     for tex_file in tex_files:
+        # 排除明显的模板文件
+        if any(kw in tex_file.name.lower() for kw in EXCLUDE_KEYWORDS):
+            continue
         try:
             content = tex_file.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
         if re.search(r"\\documentclass", content):
-            return tex_file
-    raise FileNotFoundError(f"在 {paper_dir} 中未找到含 \\documentclass 的 tex 文件")
+            candidates.append((tex_file, content))
+
+    if not candidates:
+        # 退而求其次：不排除 template 等关键词
+        for tex_file in tex_files:
+            try:
+                content = tex_file.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            if re.search(r"\\documentclass", content):
+                candidates.append((tex_file, content))
+
+    if not candidates:
+        raise FileNotFoundError(f"在 {paper_dir} 中未找到含 \\documentclass 的 tex 文件")
+
+    # 按优先名称排序，否则按文件内容长度降序（正文最多的最可能是主文件）
+    def priority(item):
+        name = item[0].name.lower()
+        if name in PREFERRED:
+            return (0, PREFERRED.index(name), 0)
+        return (1, 0, -len(item[1]))
+
+    candidates.sort(key=priority)
+    return candidates[0][0]
 
 
 def merge_tex(tex_path: Path, _visited: set = None, _root_dir: Path = None) -> str:
