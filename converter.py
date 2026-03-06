@@ -248,21 +248,77 @@ def tex_to_markdown(merged_tex: str, output_path: Path) -> Path:
     return output_path
 
 
+def fix_pdf_headings(md: str) -> str:
+    """将 pymupdf4llm 输出的 bold 标题格式转为标准 Markdown heading。
+
+    **1** **Introduction**   →  # 1 Introduction
+    **2.1** **Sub**          →  ## 2.1 Sub
+    **Abstract**             →  ## Abstract
+    **References**           →  ## References
+    """
+    def _to_heading(m):
+        num = m.group(1)
+        title = m.group(2).strip()
+        depth = num.count(".") + 1
+        return "#" * depth + " " + num + " " + title
+
+    md = re.sub(
+        r"^\*\*(\d+[\.\d]*)\*\*\s+\*\*([^*]+)\*\*",
+        _to_heading,
+        md,
+        flags=re.MULTILINE,
+    )
+    md = re.sub(r"^\*\*Abstract\*\*\s*$", "## Abstract", md, flags=re.MULTILINE)
+    md = re.sub(r"^\*\*References\*\*\s*$", "## References", md, flags=re.MULTILINE)
+    return md
+
+
+def pdf_to_markdown(pdf_path: Path, output_path: Path) -> Path:
+    """用 pymupdf4llm 将 PDF 转为 Markdown，并规范化章节标题。"""
+    try:
+        import pymupdf4llm
+    except ImportError:
+        raise ImportError("PDF 转换需要 pymupdf4llm，请运行: pip3 install pymupdf4llm")
+
+    print(f"[转换] 调用 pymupdf4llm 转 Markdown...")
+    md = pymupdf4llm.to_markdown(str(pdf_path))
+    md = fix_pdf_headings(md)
+    output_path.write_text(md, encoding="utf-8")
+    return output_path
+
+
 def convert(arxiv_id: str, data_dir: str = "./data") -> Path:
-    """主入口：找主文件 → 合并 → 转 MD，返回 MD 文件路径。"""
+    """主入口：找主文件 → 合并 → 转 MD，返回 MD 文件路径。
+    若无 LaTeX 源码但有 PDF，自动走 PDF 转换路径。
+    """
     paper_dir = Path(data_dir) / arxiv_id
     if not paper_dir.exists():
         raise FileNotFoundError(f"目录不存在：{paper_dir}，请先运行 downloader.py")
 
+    output_path = paper_dir / "full_paper.md"
+
     print(f"[查找] 寻找主 tex 文件...")
-    main_tex = find_main_tex(paper_dir)
+    try:
+        main_tex = find_main_tex(paper_dir)
+    except FileNotFoundError:
+        # 无 LaTeX 源码，尝试 PDF fallback
+        pdf_files = list(paper_dir.glob("*.pdf"))
+        if not pdf_files:
+            raise FileNotFoundError(
+                f"在 {paper_dir} 中既无 LaTeX 源码也无 PDF 文件"
+            )
+        pdf_path = pdf_files[0]
+        print(f"[回退] 未找到 tex，使用 PDF：{pdf_path.name}")
+        pdf_to_markdown(pdf_path, output_path)
+        print(f"[完成] 已保存到 {output_path}（{output_path.stat().st_size / 1024:.1f} KB）")
+        return output_path
+
     print(f"[找到] {main_tex.relative_to(paper_dir)}")
 
     print(f"[合并] 递归内联 \\input{{}} / \\include{{}}...")
     merged = merge_tex(main_tex)
     print(f"[完成] 合并后共 {len(merged)} 字符")
 
-    output_path = paper_dir / "full_paper.md"
     print(f"[转换] 调用 pandoc 转 Markdown...")
     tex_to_markdown(merged, output_path)
     print(f"[完成] 已保存到 {output_path}（{output_path.stat().st_size / 1024:.1f} KB）")

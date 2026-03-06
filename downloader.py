@@ -53,8 +53,17 @@ def download_arxiv_source(arxiv_id: str, data_dir: str = "./data") -> Path:
     return archive_path
 
 
+def _is_pdf(path: Path) -> bool:
+    """检查文件是否为 PDF（通过魔数）。"""
+    try:
+        with open(path, "rb") as f:
+            return f.read(4) == b"%PDF"
+    except OSError:
+        return False
+
+
 def extract_archive(archive_path: Path, extract_dir: Path) -> Path:
-    """解压 tar.gz 或单个 .gz 文件到 extract_dir，返回解压目录。"""
+    """解压 tar.gz 或单个 .gz 文件到 extract_dir；若文件是 PDF 则直接保存。"""
     extract_dir.mkdir(parents=True, exist_ok=True)
 
     # 先尝试作为 tar.gz 解压
@@ -62,6 +71,11 @@ def extract_archive(archive_path: Path, extract_dir: Path) -> Path:
         print(f"[解压] tar 格式 → {extract_dir}")
         with tarfile.open(archive_path, "r:gz") as tf:
             tf.extractall(path=extract_dir)
+    elif _is_pdf(archive_path):
+        # ArXiv 只提供 PDF（无 LaTeX 源码）
+        out_file = extract_dir / (archive_path.stem + ".pdf")
+        print(f"[保存] PDF 格式 → {out_file}")
+        shutil.copy2(archive_path, out_file)
     else:
         # 单个 .gz 文件（单 tex）
         out_file = extract_dir / (archive_path.stem + ".tex")
