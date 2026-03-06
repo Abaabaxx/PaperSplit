@@ -77,6 +77,18 @@ class TestFixPdfHeadings(unittest.TestCase):
         result = self.fix(md)
         self.assertIn("## References", result)
 
+    def test_single_bold_with_period(self):
+        """**1. Introduction** 格式也应被转换"""
+        md = "**1. Introduction**\n\nContent."
+        result = self.fix(md)
+        self.assertIn("# 1 Introduction", result)
+
+    def test_single_bold_subsection_with_period(self):
+        """**2.1. Related Work** 格式也应被转换"""
+        md = "**2.1. Related Work**\n\nContent."
+        result = self.fix(md)
+        self.assertIn("## 2.1 Related Work", result)
+
     def test_body_bold_unchanged(self):
         """正文中的加粗（非标题）不应被修改"""
         md = "Some **bold** text in the middle of a sentence."

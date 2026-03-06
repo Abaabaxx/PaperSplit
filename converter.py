@@ -251,19 +251,30 @@ def tex_to_markdown(merged_tex: str, output_path: Path) -> Path:
 def fix_pdf_headings(md: str) -> str:
     """将 pymupdf4llm 输出的 bold 标题格式转为标准 Markdown heading。
 
-    **1** **Introduction**   →  # 1 Introduction
-    **2.1** **Sub**          →  ## 2.1 Sub
-    **Abstract**             →  ## Abstract
-    **References**           →  ## References
+    支持两种常见格式：
+      **1** **Introduction**   →  # 1 Introduction
+      **1. Introduction**      →  # 1 Introduction
+      **2.1** **Sub**          →  ## 2.1 Sub
+      **2.1. Sub**             →  ## 2.1 Sub
+      **Abstract**             →  ## Abstract
+      **References**           →  ## References
     """
     def _to_heading(m):
-        num = m.group(1)
+        num = m.group(1).rstrip(".")   # 去掉末尾的句点（如 "1." → "1"）
         title = m.group(2).strip()
         depth = num.count(".") + 1
         return "#" * depth + " " + num + " " + title
 
+    # 格式一：**1** **Introduction**
     md = re.sub(
         r"^\*\*(\d+[\.\d]*)\*\*\s+\*\*([^*]+)\*\*",
+        _to_heading,
+        md,
+        flags=re.MULTILINE,
+    )
+    # 格式二：**1. Introduction** 或 **2.1. Sub**
+    md = re.sub(
+        r"^\*\*(\d+[\.\d]*\.?)\s+([^*]+)\*\*\s*$",
         _to_heading,
         md,
         flags=re.MULTILINE,
