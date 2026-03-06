@@ -126,6 +126,8 @@ def preprocess_tex(tex: str) -> str:
     # \global\long\def / \long\def → \def（pandoc 不认识 \long 修饰符）
     tex = re.sub(r"\\global\\long\\def\b", r"\\def", tex)
     tex = re.sub(r"\\long\\def\b", r"\\def", tex)
+    # 移除裸 { ：空格后跟 { 且后面不是 \ 或 { 的（LaTeX 源码 bug：未关闭的文本级分组）
+    tex = re.sub(r"(?<= )\{(?=[^\\{\n])", "", tex)
     # 修复剩余不匹配的环境标签
     tex = _fix_unmatched_envs(tex)
     return tex
